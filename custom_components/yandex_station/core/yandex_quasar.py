@@ -417,6 +417,7 @@ class YandexQuasar(Dispatcher):
     async def get_device(self, device: dict):
         r = await self.session.get(f"{URL_USER}/{device['item_type']}s/{device['id']}")
         resp = await r.json()
+        _LOGGER.debug(f"Updated device: {resp}")
         assert resp["status"] == "ok", resp
         return resp
 
@@ -429,21 +430,9 @@ class YandexQuasar(Dispatcher):
             action["type"] = "devices.capabilities.custom.button"
         else:
             return
-
-        r = await self.session.post(
-            f"{URL_USER}/{device['item_type']}s/{device['id']}/actions",
-            json={"actions": [action]},
-        )
-        resp = await r.json()
-        assert resp["status"] == "ok", resp
-
-        # update device state
-        device = await self.get_device(device)
-        self.dispatch_update(device["id"], device)
+        await self._device_actions(device, [action])
 
     async def device_actions(self, device: dict, **kwargs):
-        _LOGGER.debug(f"Device action: {kwargs}")
-
         actions = []
         for k, v in kwargs.items():
             type_ = (
@@ -455,17 +444,40 @@ class YandexQuasar(Dispatcher):
                 else {"instance": k, "value": v}
             )
             actions.append({"type": type_, "state": state})
+        await self._device_actions(device, actions)
 
+    async def _device_actions(self, device: dict, actions: list[dict]):
         r = await self.session.post(
             f"{URL_USER}/{device['item_type']}s/{device['id']}/actions",
             json={"actions": actions},
         )
         resp = await r.json()
+        _LOGGER.debug(f"Device actions '{actions}' -> {resp}")
+        if resp.get('status') == 'ok':
+            await self._apply_action_result(device, actions,
+                                            next(filter(lambda dev: dev.get('id') == device.get('id'),
+                                                        resp.get('devices')), None))
+
+        asyncio.create_task(self._delayed_update_device(device))
         assert resp["status"] == "ok", resp
 
-        # update device state
-        device = await self.get_device(device)
-        self.dispatch_update(device["id"], device)
+    async def _apply_action_result(self, device: dict, actions: list[dict], update: dict):
+        if update is None:
+            return
+
+        update.update(state='online')
+        for action in actions:
+            action_type = action.get('type')
+            capability = next(cap for cap in update.get('capabilities') if cap.get('type') == action_type)
+            if capability and capability.get('state').get('action_result') == {'status': 'DONE'}:
+                capability['state'] = action.get('state')
+        _LOGGER.debug(f"Update '{update}'")
+        self.dispatch_update(device['id'], update)
+
+    async def _delayed_update_device(self, device: dict, delay=2):
+        await asyncio.sleep(delay)
+        updated_device = await self.get_device(device)
+        self.dispatch_update(updated_device["id"], updated_device)
 
     async def update_online_stats(self):
         if not self.online_updated.is_set():
@@ -488,8 +500,8 @@ class YandexQuasar(Dispatcher):
         for speaker in resp["items"]:
             for device in self.devices:
                 if (
-                    "quasar_info" not in device
-                    or device["quasar_info"]["device_id"] != speaker["id"]
+                        "quasar_info" not in device
+                        or device["quasar_info"]["device_id"] != speaker["id"]
                 ):
                     continue
                 device["online"] = speaker["online"]

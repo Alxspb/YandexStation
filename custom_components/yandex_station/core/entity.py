@@ -19,7 +19,8 @@ def extract_parameters(items: list[dict]) -> dict:
 def extract_state(items: list[dict]) -> dict:
     result = {}
     for item in items:
-        instance = item["parameters"].get("instance", "on")
+        instance = item.get('parameters', item.get('state'))\
+            .get("instance", "on")
         value = item["state"]["value"] if item["state"] else None
         result[instance] = value
     return result
