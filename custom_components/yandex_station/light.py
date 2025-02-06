@@ -6,6 +6,8 @@ from .hass import hass_utils
 
 INCLUDE_TYPES = (
     "devices.types.light",
+    "devices.types.light.ceiling",
+    "devices.types.light.lamp",
     "devices.types.light.strip",
 )
 
@@ -114,7 +116,7 @@ class YandexLight(LightEntity, YandexEntity):
         if not payload:
             payload["on"] = True
 
-        await self.quasar.device_actions(self.device, **payload)
+        await self.device_actions(**payload)
 
     async def async_turn_off(self, **kwargs):
-        await self.quasar.device_actions(self.device, on=False)
+        await self.device_actions(on=False)

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from homeassistant.components.climate import (
@@ -42,6 +43,8 @@ class YandexClimate(ClimateEntity, YandexEntity):
     preset_instance: str = None
     on_value: bool = None
     hvac_value: str = None
+    # fix https://github.com/AlexxIT/YandexStation/issues/615
+    assumed_hvac_mode: HVACMode = None
 
     # https://developers.home-assistant.io/blog/2024/01/24/climate-climateentityfeatures-expanded
     if (MAJOR_VERSION, MINOR_VERSION) >= (2024, 2):
@@ -76,6 +79,9 @@ class YandexClimate(ClimateEntity, YandexEntity):
         else:
             self._attr_hvac_modes = [HVACMode.AUTO]
 
+        if len(self._attr_hvac_modes) == 1:
+            self.assumed_hvac_mode = self._attr_hvac_modes[0]
+
         if "on" in capabilities:
             self._attr_hvac_modes += [HVACMode.OFF]
 
@@ -106,13 +112,13 @@ class YandexClimate(ClimateEntity, YandexEntity):
 
         # if instance on is False => state = OFF
         # else state = mode from instance thermostat
-        # else state = ON
+        # else state = assumed hvac_mode
         if self.on_value is False:
             self._attr_hvac_mode = HVACMode.OFF
         elif self.hvac_value:
             self._attr_hvac_mode = HVACMode(self.hvac_value)
         else:
-            self._attr_hvac_mode = self._attr_hvac_modes[0]
+            self._attr_hvac_mode = self.assumed_hvac_mode
 
         if "fan_speed" in capabilities:
             self._attr_fan_mode = capabilities["fan_speed"]
@@ -130,14 +136,24 @@ class YandexClimate(ClimateEntity, YandexEntity):
 
     async def async_added_to_hass(self):
         if item := self.config.get("current_temperature"):
-            on_remove = utils.track_template(self.hass, item, self.on_track_template)
+            on_remove = utils.track_template(self.hass, item, self.on_track_temperature)
+            self.async_on_remove(on_remove)
+        if item := self.config.get("current_humidity"):
+            on_remove = utils.track_template(self.hass, item, self.on_track_humidity)
             self.async_on_remove(on_remove)
 
-    def on_track_template(self, value):
+    def on_track_temperature(self, value):
         try:
             self._attr_current_temperature = float(value)
         except:
             self._attr_current_temperature = None
+        self._async_write_ha_state()
+
+    def on_track_humidity(self, value):
+        try:
+            self._attr_current_humidity = int(value)
+        except:
+            self._attr_current_humidity = None
         self._async_write_ha_state()
 
     async def async_turn_on(self) -> None:
@@ -145,23 +161,37 @@ class YandexClimate(ClimateEntity, YandexEntity):
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode):
         if hvac_mode == HVACMode.OFF:
-            kwargs = {"on": False}
+            await self.device_action("on", False)
         elif self.hvac_instance is None:
-            kwargs = {"on": True}
-        else:
-            kwargs = (
-                {"on": True, self.hvac_instance: str(hvac_mode)}
-                if self._attr_hvac_mode == HVACMode.OFF
-                else {self.hvac_instance: str(hvac_mode)}
-            )
-
-        await self.quasar.device_actions(self.device, **kwargs)
+            await self.device_action("on", True)
+        elif await self.internal_set_hvac_mode(str(hvac_mode)):
+            self.assumed_hvac_mode = hvac_mode
 
     async def async_set_temperature(self, temperature: float, **kwargs):
-        await self.quasar.device_action(self.device, "temperature", temperature)
+        await self.device_action("temperature", temperature)
 
     async def async_set_fan_mode(self, fan_mode: str):
-        await self.quasar.device_action(self.device, "fan_speed", fan_mode)
+        await self.device_action("fan_speed", fan_mode)
 
     async def async_set_preset_mode(self, preset_mode: str):
-        await self.quasar.device_action(self.device, self.preset_instance, preset_mode)
+        await self.device_action(self.preset_instance, preset_mode)
+
+    async def internal_set_hvac_mode(self, value: str) -> bool:
+        # https://github.com/AlexxIT/YandexStation/issues/577
+        if self._attr_hvac_mode == HVACMode.OFF:
+            await self.device_action("on", True)
+            await asyncio.sleep(1)
+
+        for _ in range(3):
+            try:
+                await self.device_action(self.hvac_instance, value)
+                return True
+            except Exception as e:
+                # https://github.com/AlexxIT/YandexStation/issues/561
+                if "DEVICE_OFF" in str(e):
+                    await self.device_action("on", True)
+                    await asyncio.sleep(1)
+                else:
+                    raise e
+
+        return False

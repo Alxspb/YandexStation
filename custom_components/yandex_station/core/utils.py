@@ -11,15 +11,16 @@ from typing import Callable, List
 from aiohttp import ClientSession, web
 from homeassistant.components import frontend
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.components.media_player import SUPPORT_PLAY_MEDIA
+from homeassistant.components.media_player import MediaPlayerEntityFeature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import network
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.helpers.event import (
-    async_track_template_result,
     TrackTemplate,
     TrackTemplateResult,
+    async_track_template_result,
 )
 from homeassistant.helpers.template import Template
 from yarl import URL
@@ -184,10 +185,11 @@ RE_MEDIA = {
         r"(https?://ok\.ru/video/\d+|https?://vk.com/video-?[0-9_]+)"
     ),
     "vk": re.compile(r"https://vk\.com/.*(video-?[0-9_]+)"),
+    "bookmate": re.compile(r"https://books\.yandex\.ru/audiobooks/(\w+)"),
 }
 
 
-async def get_media_payload(text: str, session):
+async def get_media_payload(session, text: str) -> dict | None:
     for k, v in RE_MEDIA.items():
         if m := v.search(text):
             if k in ("youtube", "kinopoisk", "strm", "yavideo"):
@@ -198,8 +200,7 @@ async def get_media_payload(text: str, session):
                 return play_video_by_descriptor("yavideo", url)
 
             elif k == "music.yandex.playlist":
-                uid = await get_userid_v2(session, m[1])
-                if uid:
+                if uid := await get_playlist_uid(session, m[1], m[2]):
                     return {
                         "command": "playMusic",
                         "type": "playlist",
@@ -216,12 +217,27 @@ async def get_media_payload(text: str, session):
             elif k == "kinopoisk.id":
                 try:
                     r = await session.get(
-                        "https://ott-widget.kinopoisk.ru/ott/api/" "kp-film-status/",
+                        "https://ott-widget.kinopoisk.ru/ott/api/kp-film-status/",
                         params={"kpFilmId": m[1]},
                     )
                     resp = await r.json()
                     return play_video_by_descriptor("kinopoisk", resp["uuid"])
 
+                except:
+                    return None
+
+            elif k == "bookmate":
+                try:
+                    r = await session.post(
+                        "https://api-gateway-rest.bookmate.yandex.net/audiobook/album",
+                        json={"audiobook_uuid": m[1]},
+                    )
+                    resp = await r.json()
+                    return {
+                        "command": "playMusic",
+                        "type": "album",
+                        "id": resp["album_id"],
+                    }
                 except:
                     return None
 
@@ -313,31 +329,13 @@ def fix_cloud_text(text: str) -> str:
     return text.strip()[:100]
 
 
-async def get_userid_v1(session: ClientSession, username: str, playlist_id: str):
+async def get_playlist_uid(session, username: str, playlist_id: str) -> int | None:
     try:
-        payload = {
-            "owner": username,
-            "kinds": playlist_id,
-            "light": "true",
-            "withLikesCount": "false",
-            "lang": "ru",
-            "external-domain": "music.yandex.ru",
-            "overembed": "false",
-        }
         r = await session.get(
-            "https://music.yandex.ru/handlers/playlist.jsx", params=payload
+            f"https://api.music.yandex.net/users/{username}/playlists/{playlist_id}",
         )
         resp = await r.json()
-        return resp["playlist"]["owner"]["uid"]
-    except:
-        return None
-
-
-async def get_userid_v2(session: ClientSession, username: str):
-    try:
-        r = await session.get(f"https://music.yandex.ru/users/{username}/playlists")
-        resp = await r.text()
-        return re.search(r'"uid":"(\d+)",', resp)[1]
+        return resp["result"]["owner"]["uid"]
     except:
         return None
 
@@ -388,12 +386,13 @@ def get_media_players(hass: HomeAssistant, speaker_id: str) -> List[dict]:
                 "name": (
                     (entity.registry_entry and entity.registry_entry.name)
                     or entity.name
+                    or entity.entity_id
                 ),
             }
             for entity in ec.entities
             if (
                 entity.platform.platform_name != DOMAIN
-                and entity.supported_features & SUPPORT_PLAY_MEDIA
+                and entity.supported_features & MediaPlayerEntityFeature.PLAY_MEDIA
             )
         ]
     except Exception as e:
@@ -422,7 +421,8 @@ def track_template(hass: HomeAssistant, template: str, update: Callable) -> Call
     template = Template(template, hass)
     update(template.async_render())
 
-    def action(event, updates: list[TrackTemplateResult]):
+    # important to use async because from sync action will be problems with update state
+    async def action(event, updates: list[TrackTemplateResult]):
         update(next(i.result for i in updates))
 
     track = async_track_template_result(
@@ -431,10 +431,22 @@ def track_template(hass: HomeAssistant, template: str, update: Callable) -> Call
     return track.async_remove
 
 
+def get_entity(hass: HomeAssistant, entity_id: str) -> Entity | None:
+    try:
+        ec: EntityComponent = hass.data["entity_components"]["media_player"]
+        return next(e for e in ec.entities if e.entity_id == entity_id)
+    except:
+        pass
+    return None
+
+
+MIME_TYPES = {"aac": "audio/aac", "flac": "audio/x-flac", "mp3": "audio/mpeg"}
+
+
 class StreamingView(HomeAssistantView):
     requires_auth = False
 
-    url = "/api/yandex_station/{sid}/{uid}.mp3"
+    url = "/api/yandex_station/{sid}/{uid}.{ext}"
     name = "api:yandex_station"
 
     links: dict = {}
@@ -443,39 +455,40 @@ class StreamingView(HomeAssistantView):
         self.session = async_get_clientsession(hass)
 
     @staticmethod
-    def get_url(hass: HomeAssistant, sid: str, url: str):
+    def get_url(hass: HomeAssistant, sid: str, url: str, ext: str):
+        assert ext in MIME_TYPES
         sid = sid.lower()
         uid = hashlib.md5(url.encode()).hexdigest()
         StreamingView.links[sid] = url
-        return f"{network.get_url(hass)}/api/yandex_station/{sid}/{uid}.mp3"
+        local_url = f"{network.get_url(hass)}/api/yandex_station/{sid}/{uid}.{ext}"
+        _LOGGER.debug(f"Streaming URL: {local_url}")
+        return local_url
 
-    async def head(self, request: web.Request, sid: str, uid: str):
+    async def head(self, request: web.Request, sid: str, uid: str, ext: str):
         url: str = self.links.get(sid)
         if not url or hashlib.md5(url.encode()).hexdigest() != uid:
             return web.HTTPNotFound()
 
-        async with self.session.head(url) as r:
-            return web.Response(
-                headers={
-                    "Accept-Ranges": "bytes",
-                    # important for DLNA players
-                    "Content-Type": "audio/mpeg",
-                    # inportant for SamsungTV
-                    "Content-Length": r.headers["Content-Length"],
-                }
-            )
+        headers = {"Range": r} if (r := request.headers.get("Range")) else None
+        async with self.session.head(url, headers=headers) as r:
+            response = web.Response(status=r.status)
+            response.headers.update(r.headers)
+            # important for DLNA players
+            response.headers["Content-Type"] = MIME_TYPES[ext]
+            return response
 
-    async def get(self, request: web.Request, sid: str, uid: str):
+    async def get(self, request: web.Request, sid: str, uid: str, ext: str):
         url: str = self.links.get(sid)
         if not url or hashlib.md5(url.encode()).hexdigest() != uid:
             return web.HTTPNotFound()
 
         try:
-            rng = request.headers.get("Range")
-            headers = {"Range": rng} if rng else None
+            headers = {"Range": r} if (r := request.headers.get("Range")) else None
             async with self.session.get(url, headers=headers) as r:
-                response = web.StreamResponse()
+                response = web.StreamResponse(status=r.status)
                 response.headers.update(r.headers)
+                response.headers["Content-Type"] = MIME_TYPES[ext]
+
                 await response.prepare(request)
 
                 # same chunks as default web.FileResponse

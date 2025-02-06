@@ -6,6 +6,8 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import (
+    CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
+    CONCENTRATION_PARTS_PER_MILLION,
     LIGHT_LUX,
     PERCENTAGE,
     UnitOfElectricCurrent,
@@ -13,7 +15,6 @@ from homeassistant.const import (
     UnitOfPower,
     UnitOfPressure,
     UnitOfTemperature,
-    CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
 )
 
 from .core.entity import YandexCustomEntity
@@ -39,6 +40,7 @@ INCLUDE_TYPES = (
     "devices.types.smart_meter.gas",
     "devices.types.smart_meter.heat",
     "devices.types.smart_meter.hot_water",
+    "devices.types.smart_speaker.yandex.station.plum",
     "devices.types.socket",
 )
 INCLUDE_PROPERTIES = ("devices.properties.float", "devices.properties.event")
@@ -52,6 +54,11 @@ ENTITY_DESCRIPTIONS: dict[str, dict] = {
         "class": SENSOR.PM25,
         "units": CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
     },
+    "pm10_density": {
+        "class": SENSOR.PM10,
+        "units": CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
+    },
+    "co2_level": {"class": SENSOR.CO2, "units": CONCENTRATION_PARTS_PER_MILLION},
     "illumination": {"class": SENSOR.ILLUMINANCE, "units": LIGHT_LUX},
     "battery_level": {"class": SENSOR.BATTERY, "units": PERCENTAGE},
     "pressure": {"class": SENSOR.PRESSURE, "units": UnitOfPressure.MMHG},

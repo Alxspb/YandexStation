@@ -6,7 +6,7 @@ from homeassistant.const import CONF_INCLUDE
 from homeassistant.core import HomeAssistant
 
 from ..climate import INCLUDE_TYPES as CLIMATE
-from ..core.const import DOMAIN, DATA_CONFIG
+from ..core.const import DATA_CONFIG, DOMAIN
 from ..core.yandex_quasar import YandexQuasar
 from ..cover import INCLUDE_TYPES as COVER
 from ..humidifier import INCLUDE_TYPES as HUMIDIFIER
@@ -15,7 +15,7 @@ from ..media_player import INCLUDE_TYPES as MEDIA_PLAYER
 from ..vacuum import INCLUDE_TYPES as VACUUM
 from ..water_heater import INCLUDE_TYPES as WATER_HEATER
 
-INCLUDE_KEYS = ("id", "name", "type", "room_name", "skill_id")
+INCLUDE_KEYS = ("id", "name", "type", "room_name", "skill_id", "house_name")
 
 INCLUDE_TYPES_UNKNOWN = (
     "devices.types.camera",
@@ -94,8 +94,13 @@ def build_include_config(device: dict) -> dict:
     }
 
 
-def load_fake_devies(hass: HomeAssistant, quasar: YandexQuasar):
+async def load_fake_devies(hass: HomeAssistant, quasar: YandexQuasar):
     path = hass.config.path(DOMAIN + ".json")
-    if os.path.isfile(path):
+    if not os.path.isfile(path):
+        return
+
+    def job():
         with open(path, "rb") as f:
             quasar.devices += json.load(f)
+
+    await hass.async_add_executor_job(job)

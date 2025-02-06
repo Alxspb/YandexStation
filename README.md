@@ -46,6 +46,7 @@
   - [Второй способ вызвать TTS](#второй-способ-вызвать-tts)
   - [Диалог с колонкой](#диалог-с-колонкой)
 - [Уведомления и предупреждения](#уведомления-и-предупреждения) 
+- [Будильники](#будильники)
 
 **[Возможности локальных колонок](#возможности-локальных-колонок)**
 
@@ -54,6 +55,7 @@
 - [Стриминг музыки](#стриминг-музыки)
 - [Караоке](#караоке)
 - [Проигрывание медиа по ссылкам](#проигрывание-медиа-по-ссылкам)
+- [Получение ответов от колонки](#получение-ответов-от-колонки)
 - [Яндекс Алиса в Telegram](#яндекс-алиса-в-telegram)
 - [Список покупок](#список-покупок)
 - [Статический IP для колонки](#статический-ip-для-колонки)
@@ -62,6 +64,7 @@
 
 - [Управление умным домом Яндекса](#управление-умным-домом-яндекса)
 - [Изменение настроек Алисы](#изменение-настроек-алисы)
+- [Изменение языка Алисы](#изменение-языка-алисы)
 - [Несколько TTS в конфиге](#несколько-tts-в-конфиге)
 - [Звук Яндекс.Станции по HDMI](#звук-яндексстанции-по-hdmi)
 - [Управление яркостью экрана станции Макс](#управление-яркостью-станции-макс)
@@ -320,14 +323,14 @@ script:
 
 Далее можете выбрать "Ответить на вопрос или выполнить команду", "Прочитать текст вслух", "Проиграть звук" и прочее.
 
-Если хотите, чтоб команда бесшумно ушла в ХА - укажите выполнить команду `Сделай громче на 0`. Такие команды колонка выполняет бесшумно и по факту громкость не меняется.
+Если хотите, чтоб команда бесшумно ушла в ХА - укажите выполнить команду `ничего не делай`.
 
 Когда колонка выполнит такой сценарий, в ХА появятся два события с дополнительными параметрами:
 
 - `yandex_speaker` - срабатывает ТОЛЬКО на "Выполнить команду" и может не срабатывать, если включена бета YandexGPT 2
   ```yaml
   instance: text_action
-  value: Сделай громче на 0             # фраза колонке из раздела То
+  value: ничего не делай                # фраза колонке из раздела То
   entity_id: media_player.station_mini  # ID колонки в ХА
   name: Яндекс Мини                     # имя колонки в ХА
   ```
@@ -351,7 +354,7 @@ automation:
   - platform: event
     event_type: yandex_speaker
     event_data:
-      value: Сделай громче на 0  # фраза из Сценария Яндекса (раздел То) 
+      value: ничего не делай  # фраза из Сценария Яндекса (раздел То) 
   action:
   - service: media_player.play_media
     target:
@@ -364,7 +367,7 @@ automation:
 
 К сожалению, нельзя узнать фразу, которую сказали колонке. Можно узнать только фразу, которую колонка выполнила.
 
-Для создания нескольких сценариев с "бешумным выполнением", используйте знаки пунктуации `-,!.:=?` и их комбинации `Сделай громче на 0???!!!`. Эффект не изменится, а в ХА вы сможете различать, на какую фразу произошла реакция.
+Для создания нескольких сценариев с "бешумным выполнением", используйте знаки пунктуации `-,!.:=?` и их комбинации `ничего не делай???!!!`. Эффект не изменится, а в ХА вы сможете различать, на какую фразу произошла реакция.
 
 В разделе `trigger:` > `event_data:` вы можете фильтровать колонки, чтоб выполнять разные автоматизации для разных комнат на одну и ту же фразу.
 
@@ -457,6 +460,16 @@ alert:
       - alice_alert  # название, которые указали выше
 ```
 
+## Будильники
+
+Поддерживается управление будильниками, установленными на станциях.
+
+- У каждой станции есть объект [calendar](https://www.home-assistant.io/integrations/calendar/), отключен по умолчанию. Вам нужно включить его вручную для требуемых станций
+- Календари поддерживают триггеры "за Х минут до начала события"
+- Будильник может быть установлен либо на определённую дату/время, либо на еженедельные повторения по определённым дням. Будильник может быть отключен
+- Будильники синхронизируются раз в минуту
+- Триггеры будильников синхронизируются раз в 15 минут (ограничение HA)
+
 # Возможности локальных колонок
 
 ## Третий способ вызвать TTS
@@ -521,6 +534,8 @@ script:
 - Сторонняя колонка должна иметь интеграцию в Home Assistant с поддержкой потокового воспроизведения музыки. Если она умеет функцию "воспроизвести текст" из окна медиа-плеера, то поддержка скорее всего есть.
 - Синхронизовать колонки разных производителей в идеальный мультирум нереально, поэтому звук на колонке Яндекса во время трансляции приглушается. Но при общении с Алисой звук временно возвращается.
 - Громкость колонки Яндекса также синхронизируется с внешней акустикой.
+  - Опционально синхронизацию громкости можно отключить (`sync_volume: False`)
+  - Опционально можно использовать Jinja2-шаблон для настройки произвольного соответствия громкости (`sync_volume: "{{ volume_level / 2 }}"`)
 
 Протестирована поддержка интеграций:
 
@@ -560,11 +575,25 @@ yandex_station:
       speaker_id: [media_player.yandex_station]  # опциональная привязка к конкретным колонкам Яндекса
     - entity_id: media_player.yas_306
       name: Yamaha (no sync)
-      sync_volume: False  # опциональное отключение синхронизации громкости звука
+      sync_volume: False                         # опциональное отключение синхронизации громкости звука
+    - entity_id: media_player.yas_306
+      name: Yamaha (no sync)
+      sync_volume: "{{ volume_level / 2 }}"      # использование Jinja2 для синхронизации громкости
     - entity_id: media_player.samsung
       name: SamsungTV
-      media_content_type: url  # важно для интеграции SamsungTV из HACS
+      media_content_type: url                    # важно для интеграции SamsungTV из HACS
+    - entity_id: edia_player.nest_hub
+      name: Chromecast
+      quality: lossless                          # варианты качества - lossless / nq / lq
+      codecs: flac,mp3                           # поддерживаемые кодеки - flac,aac,mp3 
 ```
+
+**Выбор качества трансляции:**
+
+- По умолчанию выбрано качество `lossless + mp3 = 320 kbpm`
+- Опционально можно изменить и качество и поддерживаемые кодеки
+- Не стоит выбирать только `flac` - не все песни есть в этом формате
+- Не все плееры умеют все форматы, например Yamaha YAS-306 не умеет AAC
 
 Вы можете переключать трансляцию через:
 
@@ -607,6 +636,8 @@ sequence:
 - Альбом на Яндекс.Музыке - [пример](https://music.yandex.ru/album/2150009)
 - Исполнитель на Яндекс.Музыке - [пример](https://music.yandex.ru/artist/41114)
 - Плейлист на Яндекс.Музыке - [пример](https://music.yandex.ru/users/music.partners/playlists/2050)
+- Аудиокнига на Яндекс.Музыке - [пример](https://music.yandex.ru/album/24151605)
+- Аудиокнига на Яндекс.Книгах - [пример](https://books.yandex.ru/audiobooks/cZduXKir)
 
 Только на устройствах с экраном (большая Станция или Модуль)
 
@@ -626,6 +657,48 @@ script:
       data:
         media_content_id: https://music.yandex.ru/album/2150009/track/19174962
         media_content_type: xxx  # тип не важен, но должен быть!
+```
+
+## Получение ответов от колонки
+
+**Только для локального режима!**
+
+**Внимание:** Примерно до лета 2024 колонка возвращала текстовый ответ на любой запрос. После очередного обновления в Яндексе колонка стала возвращать текстовый ответ только на ограниченный перечень фраз (погода, время, умный дом и тп.).
+
+**Вариант 1.** Через службу `yandex_station.send_command`.
+
+```yaml
+script:
+  example1:
+    sequence:
+      - action: yandex_station.send_command
+        data:
+          entity_id: media_player.yandex_station  # замените на вашу колонку
+          text: какая погода?
+        response_variable: response
+      - action: notify.persistent_notification
+        data:
+          message: "{{ response }}"
+```
+
+**Вариант 2.** Через `Conversation Entity`.
+
+- Доступно в Home Assistant версии 2024.5 и выше.
+- Такой объект есть у каждой колонки, но он выключен по умолчанию!
+- Можно использовать в качестве стандартной диалоговой системы [Conversation](https://www.home-assistant.io/integrations/conversation/) ([подробнее](https://github.com/AlexxIT/YandexStation/pull/530))
+
+```yaml
+script:
+  example2:
+    sequence:
+      - action: conversation.process
+        data:
+          agent_id: conversation.yandex_station_mini  # замените на вашего агента
+          text: какая погода?
+        response_variable: response
+      - action: notify.persistent_notification
+        data:
+          message: "{{ response }}"
 ```
 
 ## Яндекс Алиса в Telegram
@@ -651,19 +724,16 @@ automation:
     platform: event
     event_type: telegram_text
   action:
-    service: media_player.play_media
-    entity_id: media_player.yandex_station_mini  # замените на вашу станцию
+  - service: conversation.process
     data:
-      media_content_id: "{{ trigger.event.data.text }}"
-      media_content_type: "question:{{ trigger.event.data.chat_id }}"
-- trigger:
-    platform: event
-    event_type: yandex_station_response
-  action:
-    service: telegram_bot.send_message
+      agent_id: conversation.yandex_station_mini  # замените на вашу станцию
+      text: "{{ trigger.event.data.text }}"
+      conversation_id: "{{ trigger.event.data.chat_id }}"
+    response_variable: response
+  - service: telegram_bot.send_message
     data:
-      target: "{{ trigger.event.data.request_id }}"
-      message: "{{ trigger.event.data.text }}"
+      target: "{{ trigger.event.data.chat_id }}"
+      message: "{{ response.response.speech.plain.speech }}"
 ```
 
 Для отправки Telegram сообщений разным станциям [@ProstoMaksks](https://t.me/ProstoMaksks) предложил [такое решение](https://gist.github.com/AlexxIT/dc42882c44e298d41631720f146e701d).
@@ -799,6 +869,19 @@ script:
 - `адаптивная громкость: да/нет`
 - `кроссфейд: да/нет`
 
+## Изменение языка Алисы
+
+Переключение выбранной колонки на другие языки. Начинает отзываться на [Ясмина](https://yasmina.yango.com/)! 
+
+```yaml
+action: media_player.play_media
+target:
+  entity_id: media_player.hall_speaker  # замените на вашу колонку
+data:
+  media_content_type: locale
+  media_content_id: ru-RU               # ru-RU en-US ar-SA kk-KZ tr-TR
+```
+
 ## Несколько TTS в конфиге
 
 Если в Home Assistant подключены несколько TTS-сервисов - из карточки медиа-плеера будет вызываться самый первый из них (сортировка по имени). Например, `tts.google_translate_say` будет приоритетнее `tts.yandex_station_say`. А `tts.yandex_station_say` будет приоритетнее `tts.yandextts_say`.
@@ -848,12 +931,29 @@ script:
         media_content_type: brightness
 ``````
 
-## Настройки Proxy
+## Если Яндекс заблокирован в стране
 
-```
-# обязательно использование proxy с поддержкой HTTPS!
+[#257](https://github.com/AlexxIT/YandexStation/issues/257) [#263](https://github.com/AlexxIT/YandexStation/issues/263) [#518](https://github.com/AlexxIT/YandexStation/issues/#518) [#552](https://github.com/AlexxIT/YandexStation/issues/#552)
+
+**Использование другого домена Яндекса**
+
+```yaml
 yandex_station:
-  proxy: http://94.130.49.151:3128
+  domain: yandex.com
+```
+
+**Подключение HTTP-прокси**
+
+```yaml
+yandex_station:
+  proxy: http://username:password@123.123.123.123:3128
+```
+
+**Отключение проверки HTTPS сертификатов**
+
+```yaml
+yandex_station:
+  ssl: False
 ```
 
 ## Troubleshooting
