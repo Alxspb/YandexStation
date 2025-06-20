@@ -24,6 +24,7 @@ MIME_TYPES = {
     # application/vnd.apple.mpegurl
     "m3u8": "application/x-mpegURL",
     "ts": "video/MP2T",
+    "gif": "image/gif",
     "mp4": "video/mp4",
 }
 
